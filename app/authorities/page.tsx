@@ -22,7 +22,7 @@ type IssueRow = {
   latitude: number | null;
   longitude: number | null;
   severity: Severity | null;
-  confirmations: number | null;
+  report_count: number | null;
   status: Status | null;
   fixed_image_url: string | null;
   created_at?: string | null;
@@ -47,7 +47,7 @@ export default function AuthoritiesPage() {
     const { data, error } = await supabase
       .from("issues")
       .select("*")
-      .order("confirmations", { ascending: false });
+      .order("report_count", { ascending: false });
 
     if (error) {
       console.error(error);
@@ -231,7 +231,7 @@ function IssueCard({
         <div className="flex md:flex-col items-center md:items-start gap-2 shrink-0 md:w-20">
           <span className="text-2xl font-extrabold text-[#0F172A]">#{rank}</span>
           <span className="text-xs font-semibold text-[#16A34A] bg-[#ECFDF5] px-2 py-1 rounded-full">
-            {issue.confirmations ?? 0} confirms
+            {issue.report_count ?? 0} confirms
           </span>
         </div>
 
