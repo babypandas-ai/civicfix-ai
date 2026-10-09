@@ -10,30 +10,27 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { supabase } from "../lib/supabaseClient";
-
-type Severity = "low" | "medium" | "high";
-
-type MapIssueRow = {
-  id: string;
-  category: string | null;
-  severity: Severity | null;
-  latitude: number | null;
-  longitude: number | null;
-  status: string | null;
-};
+import { getIssues, Issue, Severity } from "../lib/issuesStore";
 
 const SEVERITY_COLOR: Record<Severity, string> = {
   high: "#DC2626",
   medium: "#F59E0B",
-  low: "#22C55E",
+  low: "#10B981",
 };
 
 const FALLBACK_CENTER: [number, number] = [12.9716, 77.5946];
-const FALLBACK_ZOOM = 12;
+const FALLBACK_ZOOM = 13;
 
-function FitToMarkers({ points }: { points: [number, number][] }) {
+function MapController({ points }: { points: [number, number][] }) {
   const map = useMap();
+
+  useEffect(() => {
+    // Invalidate size shortly after mount so tiles load cleanly without blank areas
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [map]);
 
   useEffect(() => {
     if (points.length === 0) return;
@@ -44,67 +41,102 @@ function FitToMarkers({ points }: { points: [number, number][] }) {
     }
 
     const bounds = L.latLngBounds(points);
-    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
   }, [points, map]);
 
   return null;
 }
 
 export default function LiveIssuesMap() {
-  const [issues, setIssues] = useState<MapIssueRow[]>([]);
+  const [issues, setIssues] = useState<Issue[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"all" | "high" | "medium" | "low" | "pending">("all");
 
   useEffect(() => {
-    const fetchIssues = async () => {
+    const fetchIssuesData = async () => {
       setLoading(true);
-      setLoadError(null);
-
-      const { data, error } = await supabase
-        .from("issues")
-        .select("id, category, severity, latitude, longitude, status");
-
-      if (error) {
-        console.error(error);
-        setLoadError(error.message);
-        setIssues([]);
-      } else {
-        setIssues((data as MapIssueRow[]) || []);
+      try {
+        const { issues: data } = await getIssues();
+        setIssues(data);
+      } catch (err) {
+        console.warn("Could not load issues:", err);
+      } finally {
+        setLoading(false);
       }
-
-      setLoading(false);
     };
 
-    fetchIssues();
+    fetchIssuesData();
   }, []);
 
   const plottableIssues = issues.filter(
     (issue) => issue.latitude != null && issue.longitude != null
   );
 
-  const points: [number, number][] = plottableIssues.map((issue) => [
-    issue.latitude as number,
-    issue.longitude as number,
+  const filteredIssues = plottableIssues.filter((issue) => {
+    if (filter === "high") return issue.severity === "high";
+    if (filter === "medium") return issue.severity === "medium";
+    if (filter === "low") return issue.severity === "low";
+    if (filter === "pending") return issue.status === "pending";
+    return true;
+  });
+
+  const points: [number, number][] = filteredIssues.map((issue) => [
+    issue.latitude,
+    issue.longitude,
   ]);
 
   return (
-    <div className="rounded-2xl border border-[#EEF1F5] overflow-hidden bg-white">
-      <div className="h-[420px] w-full relative">
+    <div className="rounded-2xl border border-[#EEF1F5] overflow-hidden bg-white shadow-sm">
+      {/* Map Controls & Filter Header */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-[#EEF1F5] bg-[#F8FAFC]">
+        <div className="flex items-center gap-2">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#10B981] opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-[#10B981]"></span>
+          </span>
+          <span className="text-xs font-bold text-[#0F172A] tracking-tight uppercase">
+            Live Bangalore Urban Grid
+          </span>
+          <span className="text-xs text-[#94A3B8]">·</span>
+          <span className="text-xs font-semibold text-[#10B981]">
+            {filteredIssues.length} Active Pins
+          </span>
+        </div>
+
+        {/* Severity filter chips */}
+        <div className="flex items-center gap-1.5 text-xs">
+          {(
+            [
+              { id: "all", label: "All" },
+              { id: "high", label: "Critical" },
+              { id: "medium", label: "Medium" },
+              { id: "low", label: "Low" },
+              { id: "pending", label: "Pending" },
+            ] as const
+          ).map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setFilter(item.id)}
+              className={`px-2.5 py-1 rounded-lg font-medium transition cursor-pointer ${
+                filter === item.id
+                  ? "bg-[#0F172A] text-white font-bold shadow-xs"
+                  : "bg-white text-[#64748B] hover:text-[#0F172A] border border-[#E2E8F0]"
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Map Container */}
+      <div className="h-[460px] w-full relative">
         {loading && (
-          <div className="absolute inset-0 z-[500] flex items-center justify-center bg-white/70 text-sm text-[#94A3B8]">
-            Loading live map...
-          </div>
-        )}
-
-        {!loading && loadError && (
-          <div className="absolute inset-0 z-[500] flex items-center justify-center bg-white text-sm text-[#B91C1C] px-6 text-center">
-            Could not load issues: {loadError}
-          </div>
-        )}
-
-        {!loading && !loadError && plottableIssues.length === 0 && (
-          <div className="absolute inset-0 z-[500] flex items-center justify-center bg-white text-sm text-[#94A3B8] px-6 text-center">
-            No issues with a location yet. Reports will appear here once submitted.
+          <div className="absolute inset-0 z-[500] flex items-center justify-center bg-white/70 backdrop-blur-xs text-sm font-medium text-[#64748B]">
+            <div className="flex items-center gap-2">
+              <span className="h-4 w-4 border-2 border-[#10B981] border-t-transparent rounded-full animate-spin" />
+              Loading live map pins...
+            </div>
           </div>
         )}
 
@@ -112,37 +144,72 @@ export default function LiveIssuesMap() {
           center={FALLBACK_CENTER}
           zoom={FALLBACK_ZOOM}
           scrollWheelZoom={false}
-          className="h-full w-full"
+          className="h-full w-full z-10"
         >
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          <FitToMarkers points={points} />
+          <MapController points={points} />
 
-          {plottableIssues.map((issue) => {
+          {filteredIssues.map((issue) => {
             const severity = issue.severity || "medium";
+            const color = SEVERITY_COLOR[severity];
+            const isCritical = severity === "high";
+
             return (
               <CircleMarker
                 key={issue.id}
-                center={[issue.latitude as number, issue.longitude as number]}
-                radius={10}
+                center={[issue.latitude, issue.longitude]}
+                radius={isCritical ? 12 : 9}
                 pathOptions={{
-                  color: SEVERITY_COLOR[severity],
-                  fillColor: SEVERITY_COLOR[severity],
-                  fillOpacity: 0.8,
-                  weight: 2,
+                  color: color,
+                  fillColor: color,
+                  fillOpacity: isCritical ? 0.85 : 0.7,
+                  weight: isCritical ? 3 : 2,
                 }}
               >
-                <Popup>
-                  <div className="text-xs">
-                    <p className="font-bold mb-0.5">
-                      {issue.category || "Uncategorized"}
+                <Popup className="civic-popup" minWidth={220}>
+                  <div className="text-xs space-y-2 py-1">
+                    <div className="flex items-center justify-between gap-2 border-b border-[#F1F5F9] pb-1.5">
+                      <span className="font-bold text-[#0F172A] text-sm leading-tight">
+                        {issue.category}
+                      </span>
+                      <span
+                        className="px-2 py-0.5 rounded-full font-bold text-[10px] uppercase text-white"
+                        style={{ backgroundColor: color }}
+                      >
+                        {severity}
+                      </span>
+                    </div>
+
+                    {issue.image_url && (
+                      <img
+                        src={issue.image_url}
+                        alt="Issue"
+                        className="w-full h-24 object-cover rounded-lg border border-[#E2E8F0]"
+                      />
+                    )}
+
+                    <p className="text-[#475569] text-xs leading-relaxed line-clamp-2">
+                      {issue.description || "Reported municipal hazard."}
                     </p>
-                    <p className="text-[#64748B]">
-                      Severity: {severity} · Status: {issue.status || "pending"}
-                    </p>
+
+                    <div className="pt-1.5 border-t border-[#F1F5F9] flex items-center justify-between text-[11px] text-[#64748B]">
+                      <span className="font-semibold text-[#16A34A]">
+                        🔥 {issue.report_count ?? 1} confirms
+                      </span>
+                      <span className="capitalize font-mono text-[#0F172A] bg-[#F1F5F9] px-2 py-0.5 rounded">
+                        {issue.status.replace("_", " ")}
+                      </span>
+                    </div>
+
+                    {issue.location_name && (
+                      <p className="text-[10px] text-[#94A3B8] truncate">
+                        📍 {issue.location_name}
+                      </p>
+                    )}
                   </div>
                 </Popup>
               </CircleMarker>
@@ -151,12 +218,15 @@ export default function LiveIssuesMap() {
         </MapContainer>
       </div>
 
-      <div className="flex items-center gap-5 px-5 py-3.5 border-t border-[#EEF1F5] text-xs text-[#64748B]">
-        <LegendDot color={SEVERITY_COLOR.high} label="High" />
-        <LegendDot color={SEVERITY_COLOR.medium} label="Medium" />
-        <LegendDot color={SEVERITY_COLOR.low} label="Low" />
-        <span className="ml-auto text-[#94A3B8]">
-          {plottableIssues.length} active reports
+      {/* Map Legend Footer */}
+      <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-3 border-t border-[#EEF1F5] text-xs text-[#64748B] bg-white">
+        <div className="flex items-center gap-5">
+          <LegendDot color={SEVERITY_COLOR.high} label="Critical Priority" />
+          <LegendDot color={SEVERITY_COLOR.medium} label="Medium Severity" />
+          <LegendDot color={SEVERITY_COLOR.low} label="Low / Minor" />
+        </div>
+        <span className="text-[#94A3B8]">
+          Click any pin on the map to inspect ticket details
         </span>
       </div>
     </div>
@@ -167,10 +237,10 @@ function LegendDot({ color, label }: { color: string; label: string }) {
   return (
     <span className="flex items-center gap-1.5">
       <span
-        className="w-2.5 h-2.5 rounded-full"
+        className="w-2.5 h-2.5 rounded-full ring-2 ring-white shadow-xs"
         style={{ backgroundColor: color }}
       />
-      {label}
+      <span className="font-medium text-[#334155]">{label}</span>
     </span>
   );
 }

@@ -59,12 +59,23 @@ function SuccessContent() {
 
         <div className="flex flex-col gap-3">
           <Link
-            href="/report"
-            className="w-full inline-flex items-center justify-center gap-2 bg-[#22C55E] hover:bg-[#16A34A] text-white font-semibold px-7 py-3.5 rounded-xl transition shadow-sm"
+            href="/"
+            className="w-full inline-flex items-center justify-center gap-2 bg-[#0F172A] hover:bg-[#1E293B] text-white font-semibold px-7 py-3.5 rounded-xl transition shadow-sm"
           >
-            Report Another Issue
+            🗺 View on Live Map
           </Link>
-         
+          <Link
+            href="/authorities"
+            className="w-full inline-flex items-center justify-center gap-2 bg-white hover:bg-[#F8FAFC] text-[#0F172A] font-semibold px-7 py-3.5 rounded-xl border border-[#E2E8F0] transition"
+          >
+            📋 Check Leaderboard Ranking
+          </Link>
+          <Link
+            href="/report"
+            className="w-full inline-flex items-center justify-center gap-2 bg-[#22C55E] hover:bg-[#16A34A] text-white font-semibold px-7 py-3.5 rounded-xl transition shadow-sm mt-1"
+          >
+            + Report Another Issue
+          </Link>
         </div>
       </div>
     </main>
