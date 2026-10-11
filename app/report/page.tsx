@@ -146,16 +146,16 @@ export default function ReportPage() {
       const severity = aiResult?.severity || "medium";
       const status = "pending";
 
-      // Persist into synchronized local store so LiveIssuesMap & Authorities Leaderboard immediately update
-      await addIssue({
+      // Persist directly into Supabase Storage & Supabase issues table
+      const created = await addIssue({
         category,
         description,
+        imageFile: image,
         image_url: imageDataUrl,
         latitude,
         longitude,
         severity,
         status,
-        location_name: location,
       });
 
       const params = new URLSearchParams();

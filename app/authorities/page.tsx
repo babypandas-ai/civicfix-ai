@@ -6,11 +6,12 @@ import { Inter } from "next/font/google";
 import {
   getIssues,
   updateIssue,
-  resetSeed,
+  seedIssuesToSupabase,
   Issue,
   Severity,
   Status,
 } from "../../lib/issuesStore";
+import { supabase } from "../../lib/supabaseClient";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -59,15 +60,34 @@ export default function AuthoritiesPage() {
 
     try {
       const dataUrl = await fileToDataUrl(file);
+      let fixedImageUrl = dataUrl;
+
+      // Upload fixed resolution photo to Supabase Storage bucket issue-images
+      try {
+        const fileExt = file.name.split(".").pop() || "jpg";
+        const cleanName = `fixed-${Date.now()}-${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
+        const { data: uploadData, error: uploadErr } = await supabase.storage
+          .from("issue-images")
+          .upload(cleanName, file, { contentType: file.type });
+
+        if (!uploadErr && uploadData) {
+          const { data: urlData } = supabase.storage
+            .from("issue-images")
+            .getPublicUrl(cleanName);
+          fixedImageUrl = urlData.publicUrl;
+        }
+      } catch (uploadError) {
+        console.warn("Could not upload fixed image to Supabase Storage:", uploadError);
+      }
+
       await updateIssue(issueId, {
-        fixed_image_url: dataUrl,
         status: "in_progress",
       });
 
       setIssues((prev) =>
         prev.map((issue) =>
           issue.id === issueId
-            ? { ...issue, fixed_image_url: dataUrl, status: "in_progress" }
+            ? { ...issue, fixed_image_url: fixedImageUrl, status: "in_progress" }
             : issue
         )
       );
@@ -98,13 +118,11 @@ export default function AuthoritiesPage() {
     }
   };
 
-  const handleResetData = () => {
-    if (confirm("Reset leaderboard and map issues to the official Bangalore seed dataset?")) {
-      const fresh = resetSeed();
-      const sorted = [...fresh].sort(
-        (a, b) => (b.report_count ?? 0) - (a.report_count ?? 0)
-      );
-      setIssues(sorted);
+  const handleSeedSupabase = async () => {
+    if (confirm("Insert 6 sample Bangalore civic issues directly into your Supabase database?")) {
+      setLoading(true);
+      await seedIssuesToSupabase();
+      await fetchIssuesData();
     }
   };
 
@@ -132,10 +150,10 @@ export default function AuthoritiesPage() {
           </Link>
           <div className="flex items-center gap-4">
             <button
-              onClick={handleResetData}
-              className="text-xs font-semibold text-[#64748B] hover:text-[#0F172A] transition px-3 py-1.5 rounded-lg border border-[#E2E8F0] hover:bg-[#F8FAFC] cursor-pointer"
+              onClick={handleSeedSupabase}
+              className="text-xs font-semibold text-[#16A34A] bg-[#ECFDF5] hover:bg-[#DCFCE7] transition px-3.5 py-1.5 rounded-lg border border-[#BBF7D0] cursor-pointer"
             >
-              ↻ Reset Demo Seed
+              + Seed Demo to Supabase
             </button>
             <Link
               href="/"

@@ -14,7 +14,26 @@ export async function POST(request: Request) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (apiKey && apiKey.length > 10) {
       try {
-        const prompt = `Analyze this civic problem report description: "${description}". Categorize it into one of: ["Pothole & Road Hazard", "Water Supply & Leakage", "Electrical & Streetlights", "Sanitation & Garbage", "Drainage & Sewage", "Footpath & Sidewalk", "Traffic & Road Infrastructure"]. Also assign severity: "low", "medium", or "high". Return valid JSON only: {"category": string, "severity": "low" | "medium" | "high"}`;
+        const prompt = `Analyze this civic problem report description:You are an AI civic issue detection system. Analyze the uploaded image and identify the main civic problem.
+
+**Categories:** pothole, damaged_road, broken_streetlight, garbage, overflowing_drain, water_leakage, sewage, damaged_footpath, fallen_tree, traffic_signal_issue, other, no_issue.
+
+**Severity:**
+- **Low:** Minor issue with limited impact.
+- **Medium:** Noticeable issue affecting public convenience or safety.
+- **High:** Severe issue posing significant safety risks or disrupting essential public services.
+
+Determine severity using visible evidence, considering the issue's size, extent, and potential public impact. Do not assume details that are not visible. If the image is unclear, return "unknown" severity. If no civic issue is visible, return "no_issue".
+
+Return only valid JSON in this format:
+{
+  "category": "pothole",
+  "severity": "low",
+  "confidence": 0.95,
+  "description": "Brief description of the visible issue"
+}
+
+Use only the specified categories and severity levels. Set confidence between 0 and 1. If uncertain, lower confidence rather than guessing."${description}". Categorize it into one of: ["Pothole & Road Hazard", "Water Supply & Leakage", "Electrical & Streetlights", "Sanitation & Garbage", "Drainage & Sewage", "Footpath & Sidewalk", "Traffic & Road Infrastructure"]. Also assign severity: "low", "medium", or "high". Return valid JSON only: {"category": string, "severity": "low" | "medium" | "high"}`;
 
         const geminiRes = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
