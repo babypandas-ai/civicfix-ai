@@ -16,9 +16,89 @@ export type Issue = {
   fixed_image_url?: string | null;
   created_at?: string;
   location_name?: string;
+  merged_count?: number;
 };
 
 const STORAGE_KEY = "civicfix_issues_v1";
+
+/**
+ * Calculates distance between two geographic coordinates in meters using Haversine formula.
+ */
+export function getDistanceMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371e3; // Earth radius in meters
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+  const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+    Math.cos(phi1) * Math.cos(phi2) *
+    Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}
+
+/**
+ * Groups nearby issues (distance <= 100m) of the same category (or <= 25m regardless)
+ * into a single consolidated complaint, aggregating their total confirmation count (`report_count`).
+ */
+export function groupNearbyIssues(issues: Issue[]): Issue[] {
+  if (!issues || issues.length <= 1) return issues || [];
+
+  const grouped: Issue[] = [];
+  const visited = new Set<string>();
+
+  for (let i = 0; i < issues.length; i++) {
+    const current = issues[i];
+    if (visited.has(current.id)) continue;
+    visited.add(current.id);
+
+    let totalCount = current.report_count ?? 1;
+    let mergedCount = 1;
+
+    for (let j = i + 1; j < issues.length; j++) {
+      const other = issues[j];
+      if (visited.has(other.id)) continue;
+
+      if (
+        current.latitude != null &&
+        current.longitude != null &&
+        other.latitude != null &&
+        other.longitude != null
+      ) {
+        const dist = getDistanceMeters(
+          current.latitude,
+          current.longitude,
+          other.latitude,
+          other.longitude
+        );
+
+        // Group if within 100 meters and same category, or within 25 meters
+        if (dist <= 100 && (current.category === other.category || dist <= 25)) {
+          visited.add(other.id);
+          totalCount += other.report_count ?? 1;
+          mergedCount += 1;
+        }
+      }
+    }
+
+    grouped.push({
+      ...current,
+      report_count: totalCount,
+      merged_count: mergedCount,
+    });
+  }
+
+  // Sort by report_count descending (highest reported issues at the top of leaderboard)
+  return grouped.sort((a, b) => (b.report_count ?? 0) - (a.report_count ?? 0));
+}
 
 export const SAMPLE_BANGALORE_ISSUES = [
   {
@@ -126,7 +206,6 @@ export async function getIssues(): Promise<{ issues: Issue[]; isFallback: boolea
 
     // Supabase connected successfully! Return exact Supabase rows (even if empty)
     if (!error && Array.isArray(data)) {
-      // Keep local store in sync with Supabase
       saveStoredLocalIssues(data);
       return { issues: data, isFallback: false };
     }
@@ -143,7 +222,9 @@ export async function getIssues(): Promise<{ issues: Issue[]; isFallback: boolea
 }
 
 /**
- * Add a new issue directly into Supabase table and Supabase storage bucket `issue-images`.
+ * Add a new issue into Supabase table and Supabase storage bucket `issue-images`.
+ * If an issue already exists nearby (within 100m) with the same category, groups it
+ * and increments `report_count` instead of creating duplicate clutter.
  */
 export async function addIssue(issueData: {
   category: string;
@@ -185,13 +266,56 @@ export async function addIssue(issueData: {
     }
   }
 
-  // 2. Insert into Supabase 'issues' table using only columns present in the schema
+  // 2. Check for nearby active issues (within 100 meters) to group complaints
+  try {
+    const { data: existingIssues } = await supabase
+      .from("issues")
+      .select("*")
+      .neq("status", "resolved");
+
+    if (Array.isArray(existingIssues) && existingIssues.length > 0) {
+      for (const item of existingIssues) {
+        if (item.latitude != null && item.longitude != null) {
+          const dist = getDistanceMeters(
+            issueData.latitude,
+            issueData.longitude,
+            Number(item.latitude),
+            Number(item.longitude)
+          );
+
+          // If within 100m and same category, or within 25m: MERGE!
+          if (dist <= 100 && (item.category === issueData.category || dist <= 25)) {
+            console.log(`Nearby issue detected (${dist.toFixed(1)}m away). Merging with issue ID: ${item.id}`);
+
+            const newReportCount = (item.report_count ?? 1) + 1;
+            const { data: updatedRows, error: updateErr } = await supabase
+              .from("issues")
+              .update({ report_count: newReportCount })
+              .eq("id", item.id)
+              .select();
+
+            if (!updateErr && updatedRows && updatedRows.length > 0) {
+              const mergedIssue = updatedRows[0] as Issue;
+              // Update local cache
+              const current = getStoredLocalIssues();
+              saveStoredLocalIssues(current.map((i) => (i.id === item.id ? mergedIssue : i)));
+              return mergedIssue;
+            }
+          }
+        }
+      }
+    }
+  } catch (mergeErr) {
+    console.warn("Could not check nearby issues for merge:", mergeErr);
+  }
+
+  // 3. No nearby duplicate found: insert new issue into Supabase
   const supabasePayload: Record<string, any> = {
     image_url: finalImageUrl || null,
     latitude: issueData.latitude,
     longitude: issueData.longitude,
-    category: issueData.category || "General Civic Issue",
-    severity: issueData.severity || "medium",
+    category: issueData.category || "Other",
+    severity: issueData.severity || "low",
     description: issueData.description || "",
     status: issueData.status || "pending",
     report_count: issueData.report_count ?? 1,
@@ -202,8 +326,8 @@ export async function addIssue(issueData: {
     image_url: finalImageUrl || "",
     latitude: issueData.latitude,
     longitude: issueData.longitude,
-    category: issueData.category || "General Civic Issue",
-    severity: issueData.severity || "medium",
+    category: issueData.category || "Other",
+    severity: issueData.severity || "low",
     description: issueData.description || "",
     status: issueData.status || "pending",
     report_count: issueData.report_count ?? 1,

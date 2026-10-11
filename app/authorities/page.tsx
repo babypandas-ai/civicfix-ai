@@ -7,6 +7,7 @@ import {
   getIssues,
   updateIssue,
   seedIssuesToSupabase,
+  groupNearbyIssues,
   Issue,
   Severity,
   Status,
@@ -43,11 +44,9 @@ export default function AuthoritiesPage() {
     setLoading(true);
     try {
       const { issues: data } = await getIssues();
-      // Ensure sorted by report_count descending (Leaderboard)
-      const sorted = [...data].sort(
-        (a, b) => (b.report_count ?? 0) - (a.report_count ?? 0)
-      );
-      setIssues(sorted);
+      // Group nearby issues within 100m and rank by total complaints descending
+      const grouped = groupNearbyIssues(data);
+      setIssues(grouped);
     } catch (err) {
       console.warn("Could not load issues:", err);
     } finally {
@@ -348,6 +347,11 @@ function IssueCard({
             </h3>
             {issue.severity && <SeverityBadge severity={issue.severity} />}
             {issue.status && <StatusBadge status={issue.status} />}
+            {issue.merged_count && issue.merged_count > 1 && (
+              <span className="text-[10px] font-bold text-[#1D4ED8] bg-[#EFF6FF] border border-[#BFDBFE] px-2 py-0.5 rounded-full">
+                ⚡ {issue.merged_count} nearby complaints merged
+              </span>
+            )}
           </div>
 
           <p className="text-sm text-[#475569] leading-relaxed mb-3">

@@ -10,7 +10,7 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { getIssues, Issue, Severity } from "../lib/issuesStore";
+import { getIssues, groupNearbyIssues, Issue, Severity } from "../lib/issuesStore";
 
 const SEVERITY_COLOR: Record<Severity, string> = {
   high: "#DC2626",
@@ -57,7 +57,8 @@ export default function LiveIssuesMap() {
       setLoading(true);
       try {
         const { issues: data } = await getIssues();
-        setIssues(data);
+        const grouped = groupNearbyIssues(data);
+        setIssues(grouped);
       } catch (err) {
         console.warn("Could not load issues:", err);
       } finally {
@@ -200,9 +201,15 @@ export default function LiveIssuesMap() {
                       <span className="font-semibold text-[#16A34A]">
                         🔥 {issue.report_count ?? 1} confirms
                       </span>
-                      <span className="capitalize font-mono text-[#0F172A] bg-[#F1F5F9] px-2 py-0.5 rounded">
-                        {issue.status.replace("_", " ")}
-                      </span>
+                      {issue.merged_count && issue.merged_count > 1 ? (
+                        <span className="text-[10px] font-bold text-[#1D4ED8] bg-[#EFF6FF] px-1.5 py-0.5 rounded">
+                          {issue.merged_count} reports merged
+                        </span>
+                      ) : (
+                        <span className="capitalize font-mono text-[#0F172A] bg-[#F1F5F9] px-2 py-0.5 rounded">
+                          {issue.status.replace("_", " ")}
+                        </span>
+                      )}
                     </div>
 
                     {issue.location_name && (
